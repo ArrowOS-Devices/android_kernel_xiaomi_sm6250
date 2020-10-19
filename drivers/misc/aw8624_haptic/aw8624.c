@@ -1043,11 +1043,17 @@ static int aw8624_haptic_rtp_init(struct aw8624 *aw8624)
 	       (aw8624->play_mode == AW8624_HAPTIC_RTP_MODE) &&
 	       !atomic_read(&aw8624->exit_in_rtp_loop)) {
 		pr_info("%s rtp cnt = %d\n", __func__, aw8624->rtp_cnt);
-		if ((aw8624_rtp->len - aw8624->rtp_cnt) <
-		    (aw8624->ram.base_addr >> 3)) {
+		if (aw8624->rtp_cnt < aw8624->ram.base_addr) {     //2020-0305-HH
+			if((aw8624_rtp->len - aw8624->rtp_cnt) < aw8624->ram.base_addr) {
+				buf_len = aw8624_rtp->len - aw8624->rtp_cnt;
+			} else {
+				buf_len = aw8624->ram.base_addr;
+			}
+		} else if ((aw8624_rtp->len - aw8624->rtp_cnt) <
+		    (aw8624->ram.base_addr >> 2)) {
 			buf_len = aw8624_rtp->len - aw8624->rtp_cnt;
 		} else {
-			buf_len = (aw8624->ram.base_addr >> 3);
+			buf_len = (aw8624->ram.base_addr >> 2);
 		}
 		aw8624_i2c_writes(aw8624, AW8624_REG_RTP_DATA,
 				  &aw8624_rtp->data[aw8624->rtp_cnt], buf_len);
@@ -1299,8 +1305,16 @@ static int aw8624_rtp_osc_calibration(struct aw8624 *aw8624)
 			    ("%s !aw8624_haptic_rtp_get_fifo_afi done aw8624->rtp_cnt= %d \n",
 			     __func__, aw8624->rtp_cnt);
 			mutex_lock(&aw8624->rtp_lock);
-			if ((aw8624_rtp->len - aw8624->rtp_cnt) <
-			    (aw8624->ram.base_addr >> 2))
+		    //2020-0409 add start
+			if ((aw8624->rtp_cnt < aw8624->ram.base_addr)) {
+				if((aw8624_rtp->len-aw8624->rtp_cnt) < (aw8624->ram.base_addr)) {
+					buf_len = aw8624_rtp->len-aw8624->rtp_cnt;
+				} else {
+					buf_len = (aw8624->ram.base_addr);
+			}
+		    //2020-0409 add end
+			} else if ((aw8624_rtp->len - aw8624->rtp_cnt) < //2020-0409 modify
+				(aw8624->ram.base_addr >> 2))
 				buf_len = aw8624_rtp->len - aw8624->rtp_cnt;
 			else
 				buf_len = (aw8624->ram.base_addr >> 2);
@@ -1316,7 +1330,8 @@ static int aw8624_rtp_osc_calibration(struct aw8624 *aw8624)
 			mutex_unlock(&aw8624->rtp_lock);
 		}
 		osc_int_state = aw8624_haptic_osc_read_int(aw8624);
-		if (osc_int_state & AW8624_BIT_SYSINT_DONEI) {
+		//if (osc_int_state & AW8624_BIT_SYSINT_DONEI) {	//2020-0409-HH close
+		if (aw8624->rtp_cnt == aw8624_rtp->len) {           //2020-0409-HH add
 			do_gettimeofday(&aw8624->end);
 			pr_info
 			    ("%s vincent playback done aw8624->rtp_cnt= %d \n",
@@ -1780,7 +1795,7 @@ static int aw8624_haptic_f0_calibration(struct aw8624 *aw8624)
 		}
 		aw8624->f0_calib_data = (int)f0_cali_lra;
 		VIB_DEBUG("f0_cali_lra=%d", (int)f0_cali_lra);
-
+		pr_info("aw8624->f0_calib_data=%d", aw8624->f0_calib_data); //2020-0325-HH add log
 		/* update cali step */
 		aw8624_i2c_write(aw8624, AW8624_REG_TRIM_LRA,
 				 (char)f0_cali_lra);
@@ -2041,7 +2056,7 @@ static int aw8624_haptic_init(struct aw8624 *aw8624)
 	mutex_unlock(&aw8624->lock);
 
 	/* f0 calibration */
-#if 0
+#if 1	//2020-0325-HH  0->1
 	mutex_lock(&aw8624->lock);
 	aw8624_i2c_write_bits(aw8624, AW8624_REG_R_SPARE,
 			      AW8624_BIT_R_SPARE_MASK,
