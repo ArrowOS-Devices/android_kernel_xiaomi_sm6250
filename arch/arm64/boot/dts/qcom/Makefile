@@ -2,17 +2,17 @@
 ifeq ($(CONFIG_MACH_XIAOMI_ATOLL),y)
 ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
 dtbo-$(CONFIG_ARCH_ATOLL) += \
-		custa-atoll-ab-idp-overlay.dtbo \
-		custd-atoll-ab-idp-overlay.dtbo \
-		custe-atoll-ab-idp-overlay.dtbo \
-		custj-atoll-ab-idp-overlay.dtbo \
-		custg-atoll-ab-idp-overlay.dtbo
+		curtana-atoll-ab-idp-overlay.dtbo \
+		durandal-atoll-ab-idp-overlay.dtbo \
+		excalibur-atoll-ab-idp-overlay.dtbo \
+		joyeuse-atoll-ab-idp-overlay.dtbo \
+		gram-atoll-ab-idp-overlay.dtbo
 
-custa-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
-custd-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
-custe-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
-custj-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
-custg-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
+curtana-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
+durandal-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
+excalibur-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
+joyeuse-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
+gram-atoll-ab-idp-overlay.dtbo-base := cust-atoll-ab.dtb
 endif
 else
 dtb-$(CONFIG_ARCH_QCOM)	+= apq8016-sbc.dtb

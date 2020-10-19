@@ -28,12 +28,12 @@
 #include "cust-atoll-idp.dtsi"
 #include "atoll-wcd937x-idp-audio-overlay.dtsi"
 #include "cust-atoll-audio-overlay.dtsi"
-#include "custaeg-atoll-camera-sensor-idp.dtsi"
-#include "cust-low-charging.dtsi"
+#include "curtana-atoll-camera-sensor-idp.dtsi"
+#include "cust-high-charging.dtsi"
 
 / {
-	model = "wcd937x Audio Codec AB IDP CURTANA";
+	model = "wcd937x Audio Codec AB IDP EXCALIBUR";
 	compatible = "qcom,cust-atoll";
 	qcom,msm-id = <443 0x0>;
-	qcom,board-id = <0x20022 1>;
+	qcom,board-id = <0x40022 1>;
 };
