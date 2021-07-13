@@ -1,4 +1,5 @@
-/* Copyright (c) 2017-2020 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -50,6 +51,7 @@
 #define FCC_VOTER			"FCC_VOTER"
 #define MAIN_FCC_VOTER			"MAIN_FCC_VOTER"
 #define PD_VOTER			"PD_VOTER"
+#define CC_MODE_VOTER			"CC_MODE_VOTER"
 
 struct pl_data {
 	int			pl_mode;
@@ -107,7 +109,6 @@ struct pl_data {
 	int			taper_entry_fv;
 	int			main_fcc_max;
 	u32			float_voltage_uv;
-	enum power_supply_type	charger_type;
 	/* debugfs directory */
 	struct dentry		*dfs_root;
 
@@ -211,9 +212,10 @@ static int get_adapter_icl_based_ilim(struct pl_data *chip)
 		pr_err("Failed to read PD_ACTIVE status rc=%d\n",
 				rc);
 	/* Check for QC 3, 3.5 and PPS adapters, return if its none of them */
-	if (chip->charger_type != POWER_SUPPLY_TYPE_USB_HVDCP_3 &&
-		chip->charger_type != POWER_SUPPLY_TYPE_USB_HVDCP_3P5 &&
-		pval.intval != POWER_SUPPLY_PD_PPS_ACTIVE)
+	rc = power_supply_get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_REAL_TYPE, &pval);
+        if ((rc < 0) || ((pval.intval != POWER_SUPPLY_TYPE_USB_HVDCP_3)
+                          && (pval.intval != POWER_SUPPLY_TYPE_USB_HVDCP_3P5)))
 		return final_icl = get_effective_result_locked(chip->usb_icl_votable);
 
 	/*
@@ -246,9 +248,6 @@ static int get_adapter_icl_based_ilim(struct pl_data *chip)
 		if ((main_icl >= 0) && (main_icl < adapter_icl))
 			final_icl = adapter_icl - main_icl;
 	}
-
-	pr_debug("charger_type=%d final_icl=%d adapter_icl=%d main_icl=%d\n",
-		chip->charger_type, final_icl, adapter_icl, main_icl);
 
 	return final_icl;
 }
@@ -307,7 +306,6 @@ static void cp_configure_ilim(struct pl_data *chip, const char *voter, int ilim)
 			vote(chip->cp_ilim_votable, voter, true, pval.intval);
 		else
 			vote(chip->cp_ilim_votable, voter, true, ilim);
-
 		pl_dbg(chip, PR_PARALLEL,
 			"ILIM: vote: %d voter:%s min_ilim=%d fcc=%d target_icl=%d\n",
 			ilim, voter, pval.intval, fcc, target_icl);
@@ -1266,7 +1264,7 @@ static int pl_fv_vote_callback(struct votable *votable, void *data,
 			pr_err("Couldn't get battery status rc=%d\n", rc);
 		} else {
 			if (pval.intval == POWER_SUPPLY_STATUS_FULL) {
-				pr_debug("re-triggering charging\n");
+				pr_info("re-triggering charging\n");
 				pval.intval = 1;
 				rc = power_supply_set_property(chip->batt_psy,
 					POWER_SUPPLY_PROP_FORCE_RECHARGE,
@@ -1890,12 +1888,6 @@ static void handle_usb_change(struct pl_data *chip)
 		chip->total_fcc_ua = 0;
 		chip->slave_fcc_ua = 0;
 		chip->main_fcc_ua = 0;
-		chip->charger_type = POWER_SUPPLY_TYPE_UNKNOWN;
-	} else {
-		rc = power_supply_get_property(chip->usb_psy,
-				POWER_SUPPLY_PROP_REAL_TYPE, &pval);
-		if (!rc)
-			chip->charger_type = pval.intval;
 	}
 }
 

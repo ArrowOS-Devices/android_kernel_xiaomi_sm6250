@@ -4754,6 +4754,7 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 		hcd->driver->update_device(hcd, udev);
 	if (0)
 		hub_set_initial_usb2_lpm_policy(udev);
+
 fail:
 	if (retval) {
 		hub_port_disable(hub, port1, 0);

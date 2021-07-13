@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -16,7 +16,6 @@
 #include <linux/alarmtimer.h>
 #include <linux/ktime.h>
 #include <linux/types.h>
-#include <linux/timer.h>
 #include <linux/interrupt.h>
 #include <linux/irqreturn.h>
 #include <linux/regulator/driver.h>
@@ -202,7 +201,7 @@ enum print_reason {
 #define STEP_CHG_DELAYED_HIGH_MONITOR_MS	5000
 #define STEP_CHG_DELAYED_QUICK_MONITOR_MS	3000
 #define STEP_CHG_DELAYED_START_MS		100
-#define VBAT_FOR_STEP_MIN_UV			4450000
+#define VBAT_FOR_STEP_MIN_UV			4350000
 #define VBAT_FOR_STEP_HYS_UV			20000
 
 #define SIX_PIN_VFLOAT_VOTER		"SIX_PIN_VFLOAT_VOTER"
@@ -218,8 +217,6 @@ enum print_reason {
 #define CP_COOL_THRESHOLD		150
 #define CP_WARM_THRESHOLD		450
 #define SOFT_JEITA_HYSTERESIS		5
-
-#define CHARGER_SOC_DECIMAL_MS		200
 
 /* lct thermal */
 static int LCT_THERM_CALL_LEVEL;
@@ -257,6 +254,7 @@ enum {
 	USBIN_OV_WA			= BIT(3),
 	CHG_TERMINATION_WA		= BIT(4),
 	USBIN_ADC_WA			= BIT(5),
+	SKIP_MISC_PBS_IRQ_WA		= BIT(6),
 };
 
 enum jeita_cfg_stat {
@@ -603,14 +601,11 @@ struct smb_charger {
 	struct delayed_work	reg_work;
 	struct delayed_work	pr_lock_clear_work;
 	struct delayed_work	six_pin_batt_step_chg_work;
-	struct delayed_work     charger_soc_decimal;
 
 	struct alarm		lpd_recheck_timer;
 	struct alarm		moisture_protection_alarm;
 	struct alarm		chg_termination_alarm;
 	struct alarm		dcin_aicl_alarm;
-
-	struct timer_list	apsd_timer;
 
 	struct charger_param	chg_param;
 	/* secondary charger config */
@@ -631,7 +626,6 @@ struct smb_charger {
 	bool			ok_to_pd;
 	bool			typec_legacy;
 	bool			typec_irq_en;
-	bool			typec_role_swap_failed;
 
 	/* cached status */
 	bool			system_suspend_supported;
@@ -648,7 +642,6 @@ struct smb_charger {
 	int 		*thermal_fcc_qc3p5_cp;
 	int 		*thermal_fcc_pps_cp;
 	int			*thermal_mitigation;
-	int			*thermal_mitigation_cp;
 	int			dcp_icl_ua;
 	int			fake_capacity;
 	int			fake_batt_status;
@@ -661,6 +654,7 @@ struct smb_charger {
 	int			connector_type;
 	bool			otg_en;
 	bool			suspend_input_on_debug_batt;
+	bool			fake_chg_status_on_debug_batt;
 	int			default_icl_ua;
 	int			otg_cl_ua;
 	bool			uusb_apsd_rerun_done;
@@ -712,7 +706,6 @@ struct smb_charger {
 	int			charge_full_cc;
 	int			cc_soc_ref;
 	int			last_cc_soc;
-	int			term_vbat_uv;
 	int			dr_mode;
 	int			usbin_forced_max_uv;
 	int			init_thermal_ua;
@@ -724,8 +717,6 @@ struct smb_charger {
 	bool			hvdcp3_standalone_config;
 	int			wls_icl_ua;
 	bool			dpdm_enabled;
-	bool			apsd_ext_timeout;
-	bool			qc3p5_detected;
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -992,7 +983,6 @@ int smblib_set_prop_rechg_soc_thresh(struct smb_charger *chg,
 				const union power_supply_propval *val);
 void smblib_suspend_on_debug_battery(struct smb_charger *chg);
 int smblib_rerun_apsd_if_required(struct smb_charger *chg);
-void smblib_rerun_apsd(struct smb_charger *chg);
 int smblib_get_prop_fcc_delta(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_thermal_threshold(struct smb_charger *chg, u16 addr, int *val);
