@@ -1,4 +1,4 @@
-/* Copyright (c) 2018-2020 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -324,7 +324,8 @@ static int smb5_chg_config_init(struct smb5 *chip)
 	case PMI632_SUBTYPE:
 		chip->chg.chg_param.smb_version = PMI632_SUBTYPE;
 		chg->wa_flags |= WEAK_ADAPTER_WA | USBIN_OV_WA
-				| CHG_TERMINATION_WA | USBIN_ADC_WA;
+				| CHG_TERMINATION_WA | USBIN_ADC_WA
+				| SKIP_MISC_PBS_IRQ_WA;
 		chg->param = smb5_pmi632_params;
 		chg->use_extcon = true;
 		chg->name = "pmi632_charger";
@@ -746,24 +747,6 @@ static int smb5_parse_dt(struct smb5 *chip)
 		}
 	}
 	} else {
-	if (of_find_property(node, "qcom,thermal-mitigation-cp", &byte_len)) {
-		chg->thermal_mitigation_cp = devm_kzalloc(chg->dev, byte_len,
-			GFP_KERNEL);
-
-		if (chg->thermal_mitigation_cp == NULL)
-			return -ENOMEM;
-
-		chg->thermal_levels = byte_len / sizeof(u32);
-		rc = of_property_read_u32_array(node,
-				"qcom,thermal-mitigation-cp",
-				chg->thermal_mitigation_cp,
-				chg->thermal_levels);
-		if (rc < 0) {
-			dev_err(chg->dev,
-				"Couldn't read threm limits rc = %d\n", rc);
-			return rc;
-		}
-	}
 	if (of_find_property(node, "qcom,thermal-mitigation", &byte_len)) {
 		chg->thermal_mitigation = devm_kzalloc(chg->dev, byte_len,
 			GFP_KERNEL);
@@ -838,6 +821,9 @@ static int smb5_parse_dt(struct smb5 *chip)
 
 	chg->suspend_input_on_debug_batt = of_property_read_bool(node,
 					"qcom,suspend-input-on-debug-batt");
+
+	chg->fake_chg_status_on_debug_batt = of_property_read_bool(node,
+					"qcom,fake-chg-status-on-debug-batt");
 
 	rc = of_property_read_u32(node, "qcom,otg-deglitch-time-ms",
 					&chg->otg_delay_ms);
@@ -1045,8 +1031,6 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_THERM_ICL_LIMIT,
 	POWER_SUPPLY_PROP_TYPE_RECHECK,
 	POWER_SUPPLY_PROP_SKIN_HEALTH,
-	POWER_SUPPLY_PROP_APSD_RERUN,
-	POWER_SUPPLY_PROP_APSD_TIMEOUT,
 	POWER_SUPPLY_PROP_QC3P5_POWER_LIMIT,
 	POWER_SUPPLY_PROP_QC3P5_CURRENT_MAX,
 };
@@ -1260,12 +1244,6 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SKIN_HEALTH:
 		val->intval = smblib_get_skin_temp_status(chg);
 		break;
-	case POWER_SUPPLY_PROP_APSD_RERUN:
-		val->intval = 0;
-		break;
-	case POWER_SUPPLY_PROP_APSD_TIMEOUT:
-		val->intval = chg->apsd_ext_timeout;
-		break;
 	case POWER_SUPPLY_PROP_QC3P5_POWER_LIMIT:
 		val->intval = chg->qc3p5_power_limit_w;
 		break;
@@ -1318,10 +1296,6 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 		if (chg->support_ffc) {
 			rc = smblib_set_fastcharge_mode(chg, val->intval);
 			power_supply_changed(chg->bms_psy);
-			if (board_get_33w_supported()) {
-			schedule_delayed_work(&chg->charger_soc_decimal,
-					msecs_to_jiffies(CHARGER_SOC_DECIMAL_MS));
-			}
 		}
 		break;
 	case POWER_SUPPLY_PROP_PD_REMOVE_COMPENSATION:
@@ -1383,11 +1357,6 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_ADAPTER_CC_MODE:
 		chg->adapter_cc_mode = val->intval;
 		break;
-	case POWER_SUPPLY_PROP_APSD_RERUN:
-		del_timer_sync(&chg->apsd_timer);
-		chg->apsd_ext_timeout = false;
-		smblib_rerun_apsd(chg);
-		break;
 	case POWER_SUPPLY_PROP_QC3P5_CURRENT_MAX:
 		rc = vote(chg->usb_icl_votable, QC3P5_VOTER, true, val->intval);
 		break;
@@ -1409,7 +1378,6 @@ static int smb5_usb_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_THERM_ICL_LIMIT:
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT:
 	case POWER_SUPPLY_PROP_ADAPTER_CC_MODE:
-	case POWER_SUPPLY_PROP_APSD_RERUN:
 	case POWER_SUPPLY_PROP_QC3P5_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_PD_AUTHENTICATION:
 	case POWER_SUPPLY_PROP_FASTCHARGE_MODE:
@@ -1634,7 +1602,7 @@ static int smb5_usb_main_get_prop(struct power_supply *psy,
 		break;
 	/* Use this property to report SMB health */
 	case POWER_SUPPLY_PROP_HEALTH:
-		rc = val->intval = smblib_get_prop_smb_health(chg);
+		val->intval = smblib_get_prop_smb_health(chg);
 		break;
 	/* Use this property to report overheat status */
 	case POWER_SUPPLY_PROP_HOT_TEMP:
@@ -1645,10 +1613,12 @@ static int smb5_usb_main_get_prop(struct power_supply *psy,
 		rc = -EINVAL;
 		break;
 	}
-	if (rc < 0)
+	if (rc < 0) {
 		pr_debug("Couldn't get prop %d rc = %d\n", psp, rc);
+		return -ENODATA;
+	}
 
-	return rc;
+	return 0;
 }
 
 #define ILIM_ADJ_PC		10
@@ -1986,6 +1956,8 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_RECHARGE_SOC,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_FORCE_RECHARGE,
+	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
+	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_CHARGING_ENABLED,
@@ -2130,11 +2102,16 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FORCE_RECHARGE:
 		val->intval = 0;
 		break;
+	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+		rc = smblib_get_prop_from_bms(chg,
+				POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, val);
+		break;
+	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
+		rc = smblib_get_prop_from_bms(chg,
+				POWER_SUPPLY_PROP_TIME_TO_FULL_NOW, val);
+		break;
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		val->intval = chg->fcc_stepper_enable;
-		break;
-	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-		val->intval = 5020;
 		break;
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		rc = smblib_get_prop_system_temp_level(chg, val);
@@ -2696,21 +2673,18 @@ static int smb5_configure_typec(struct smb_charger *chg)
 		}
 	}
 
-	if (chg->chg_param.smb_version != PMI632_SUBTYPE) {
-		/*
-		 * Enable detection of unoriented debug
-		 * accessory in source mode
-		 */
-		rc = smblib_masked_write(chg, DEBUG_ACCESS_SRC_CFG_REG,
-					 EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT,
-					 EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT);
-		if (rc < 0) {
-			dev_err(chg->dev,
-				"Couldn't configure TYPE_C_DEBUG_ACCESS_SRC_CFG_REG rc=%d\n",
-					rc);
-			return rc;
-		}
+	/* Enable detection of unoriented debug accessory in source mode */
+	rc = smblib_masked_write(chg, DEBUG_ACCESS_SRC_CFG_REG,
+				 EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT,
+				 EN_UNORIENTED_DEBUG_ACCESS_SRC_BIT);
+	if (rc < 0) {
+		dev_err(chg->dev,
+			"Couldn't configure TYPE_C_DEBUG_ACCESS_SRC_CFG_REG rc=%d\n",
+				rc);
+		return rc;
+	}
 
+	if (chg->chg_param.smb_version != PMI632_SUBTYPE) {
 		rc = smblib_masked_write(chg, USBIN_LOAD_CFG_REG,
 				USBIN_IN_COLLAPSE_GF_SEL_MASK |
 				USBIN_AICL_STEP_TIMING_SEL_MASK,
@@ -3495,7 +3469,6 @@ static int smb5_determine_initial_status(struct smb5 *chip)
 	struct smb_charger *chg = &chip->chg;
 	union power_supply_propval val;
 	int rc;
-	//2019.12.11 longcheer xugui creates variable
 	int retries = 0;
 	u8 val1 = 0, val2 = 0;
 
@@ -3509,7 +3482,6 @@ static int smb5_determine_initial_status(struct smb5 *chip)
 	if (chg->bms_psy)
 		smblib_suspend_on_debug_battery(chg);
 
-	/*2020.02.18 longcheer xugui add start*/
 	/*Optimized delay time for find the right OTG interruption time*/
 	if (!val.intval) {
 		while (1) {
@@ -3522,7 +3494,6 @@ static int smb5_determine_initial_status(struct smb5 *chip)
 			break;
 		}
 	}
-	/*2020.02.18 longcheer xugui add end*/
 
 	usb_plugin_irq_handler(0, &irq_data);
 	typec_attach_detach_irq_handler(0, &irq_data);

@@ -1,4 +1,5 @@
-/* Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2016-2019, The Linux Foundation. All rights reserved.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,7 +29,12 @@
 #include <linux/usb/class-dual-role.h>
 #include <linux/usb/usbpd.h>
 #include "usbpd.h"
-
+#ifdef CONFIG_DEBUG_USB
+#undef dev_dbg
+#undef pr_debug
+#define dev_dbg dev_err
+#define pr_debug pr_err
+#endif
 enum usbpd_state {
 	PE_UNKNOWN,
 	PE_ERROR_RECOVERY,
@@ -462,8 +468,6 @@ struct usbpd {
 	bool			vconn_is_external;
 	u32			limit_curr;
 	u32			pd_max_curr_limit;
-	u32 			limit_pd_vbus;
-	u32 			pd_vbus_max_limit;
 
 	u8			tx_msgid[SOPII_MSG + 1];
 	u8			rx_msgid[SOPII_MSG + 1];
@@ -754,10 +758,8 @@ static int pd_send_msg(struct usbpd *pd, u8 msg_type, const u32 *data,
 		/* sending SOP'/SOP'' to a cable, PR/DR fields should be 0 */
 		hdr = PD_MSG_HDR(msg_type, 0, 0, pd->tx_msgid[sop], num_data,
 				pd->spec_rev);
-
 	pd->tx_msgid[sop] = (pd->tx_msgid[sop] + 1) & PD_MAX_MSG_ID;
 	usbpd_info(&pd->dev, "pd->tx_msgid[sop]:%d,hdr:%x\n", pd->tx_msgid[sop], hdr);
-
 	/* bail out and try again later if a message just arrived */
 	spin_lock_irqsave(&pd->rx_lock, flags);
 	if (!list_empty(&pd->rx_q)) {
@@ -776,7 +778,6 @@ static int pd_send_msg(struct usbpd *pd, u8 msg_type, const u32 *data,
 					ret);
 		return ret;
 	}
-
 	return 0;
 }
 
@@ -821,6 +822,7 @@ static int pd_send_ext_msg(struct usbpd *pd, u8 msg_type,
 					ret);
 			return ret;
 		}
+
 
 		/* Wait for request chunk */
 		if (len_remain &&
@@ -892,11 +894,6 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 		}
 
 		curr = ua / 1000;
-
-		/* if limit_pd_vbus is enabled, pd request uv will less than pd vbus max */
-		if (pd->limit_pd_vbus && uv > pd->pd_vbus_max_limit && !pd->verifed)
-			uv = pd->pd_vbus_max_limit;
-
 		/*
 		 * workaround for Zimi and similar non-compliant QC4+/PPS chargers:
 		 * if PPS power limit bit is set and QC4+ not compliant PPS chargers,
@@ -999,6 +996,7 @@ static int pd_eval_src_caps(struct usbpd *pd)
 				max_volt, min_volt, max_curr);
 	}
 
+
 	return 0;
 }
 
@@ -1011,7 +1009,6 @@ static void pd_send_hard_reset(struct usbpd *pd)
 	pd->hard_reset_count++;
 	pd_phy_signal(HARD_RESET_SIG);
 	pd->in_pr_swap = false;
-	pd->pd_connected = false;
 	power_supply_set_property(pd->usb_psy, POWER_SUPPLY_PROP_PR_SWAP, &val);
 }
 
@@ -1067,7 +1064,6 @@ static void pd_request_chunk_work(struct work_struct *w)
 	u16 hdr = PD_MSG_HDR(req->msg_type, pd->current_dr, pd->current_pr,
 				pd->tx_msgid[req->sop], 1, pd->spec_rev)
 		| PD_MSG_HDR_EXTENDED;
-
 	pd->tx_msgid[req->sop] = (pd->tx_msgid[req->sop] + 1) & PD_MAX_MSG_ID;
 	*(u16 *)payload = PD_MSG_EXT_HDR(1, req->chunk_num, 1, 0);
 
@@ -2823,10 +2819,6 @@ static void usbpd_sm(struct work_struct *w)
 		ret = pd_send_msg(pd, MSG_SOURCE_CAPABILITIES, default_src_caps,
 				ARRAY_SIZE(default_src_caps), SOP_MSG);
 		if (ret) {
-			if (pd->pd_connected) {
-				usbpd_set_state(pd, PE_SEND_SOFT_RESET);
-				break;
-			}
 			pd->caps_count++;
 			if (pd->caps_count >= PD_CAPS_COUNT) {
 				usbpd_dbg(&pd->dev, "Src CapsCounter exceeded, disabling PD\n");
@@ -2918,20 +2910,6 @@ static void usbpd_sm(struct work_struct *w)
 			usbpd_set_state(pd, PE_PRS_SRC_SNK_TRANSITION_TO_OFF);
 			break;
 		} else if (IS_CTRL(rx_msg, MSG_VCONN_SWAP)) {
-			/*
-			 * if VCONN is connected to VBUS, make sure we are
-			 * not in high voltage contract, otherwise reject.
-			 */
-			if (!pd->vconn_is_external &&
-					(pd->requested_voltage > 5000000)) {
-				ret = pd_send_msg(pd, MSG_REJECT, NULL, 0,
-						SOP_MSG);
-				if (ret)
-					usbpd_set_state(pd, PE_SEND_SOFT_RESET);
-
-				break;
-			}
-
 			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
 			if (ret) {
 				usbpd_set_state(pd, PE_SEND_SOFT_RESET);
@@ -3223,6 +3201,20 @@ static void usbpd_sm(struct work_struct *w)
 			usbpd_set_state(pd, PE_PRS_SNK_SRC_TRANSITION_TO_OFF);
 			break;
 		} else if (IS_CTRL(rx_msg, MSG_VCONN_SWAP)) {
+			/*
+			 * if VCONN is connected to VBUS, make sure we are
+			 * not in high voltage contract, otherwise reject.
+			 */
+			if (!pd->vconn_is_external &&
+					(pd->requested_voltage > 5000000)) {
+				ret = pd_send_msg(pd, MSG_REJECT, NULL, 0,
+						SOP_MSG);
+				if (ret)
+					usbpd_set_state(pd, PE_SEND_SOFT_RESET);
+
+				break;
+			}
+
 			ret = pd_send_msg(pd, MSG_ACCEPT, NULL, 0, SOP_MSG);
 			if (ret) {
 				usbpd_set_state(pd, PE_SEND_SOFT_RESET);
@@ -5114,22 +5106,6 @@ struct usbpd *usbpd_create(struct device *parent)
 		if (ret) {
 			usbpd_err(&pd->dev, "failed to read pd vbus max limit\n");
 			pd->pd_max_curr_limit = PD_MAX_CURRENT_LIMIT;
-		}
-	}
-
-	ret = of_property_read_u32(parent->of_node, "mi,limit_pd_vbus",
-			&pd->limit_pd_vbus);
-	if (ret) {
-		usbpd_err(&pd->dev, "failed to read pd vbus limit\n");
-		pd->limit_pd_vbus = false;
-	}
-
-	if (pd->limit_pd_vbus) {
-		ret = of_property_read_u32(parent->of_node, "mi,pd_vbus_max_limit",
-				&pd->pd_vbus_max_limit);
-		if (ret) {
-			usbpd_err(&pd->dev, "failed to read pd vbus max limit\n");
-			pd->pd_vbus_max_limit = PD_VBUS_MAX_VOLTAGE_LIMIT;
 		}
 	}
 
