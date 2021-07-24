@@ -43,6 +43,12 @@
 #include <linux/jiffies.h>
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
+#if WAKEUP_GESTURE
+#ifdef CONFIG_TOUCHSCREEN_COMMON
+#include <linux/input/tp_common.h>
+#endif
+#endif
+
 #ifdef CHECK_TOUCH_VENDOR
 extern char *saved_command_line;
 
@@ -176,6 +182,34 @@ int nvt_gesture_switch(struct input_dev *dev, unsigned int type, unsigned int co
 }
 
 #endif
+
+#ifdef CONFIG_TOUCHSCREEN_COMMON
+static ssize_t double_tap_show(struct kobject *kobj,
+                               struct kobj_attribute *attr, char *buf)
+{
+    return sprintf(buf, "%d\n", ts->is_gesture_mode);
+}
+
+static ssize_t double_tap_store(struct kobject *kobj,
+                                struct kobj_attribute *attr, const char *buf,
+                                size_t count)
+{
+    int rc, val;
+
+    rc = kstrtoint(buf, 10, &val);
+    if (rc)
+    return -EINVAL;
+
+    ts->is_gesture_mode = !!val;
+    return count;
+}
+
+static struct tp_common_ops double_tap_ops = {
+    .show = double_tap_show,
+    .store = double_tap_store
+};
+#endif
+
 /*function description*/
 #if NVT_USB_PLUGIN
 void nvt_ts_usb_event_callback(void)
@@ -1888,6 +1922,13 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	}
 #endif
 
+#ifdef CONFIG_TOUCHSCREEN_COMMON
+	ret = tp_common_set_double_tap_ops(&double_tap_ops);
+	if (ret < 0) {
+		NVT_ERR("%s: Failed to create double_tap node err=%d\n",
+                	__func__, ret);
+    }
+#endif
 	sprintf(ts->phys, "input/ts");
 	ts->input_dev->name = NVT_TS_NAME;
 	ts->input_dev->phys = ts->phys;
@@ -1906,9 +1947,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 		NVT_LOG("int_trigger_type=%d\n", ts->int_trigger_type);
 		ts->irq_enabled = true;
 		ret = request_threaded_irq(client->irq, NULL, nvt_ts_work_func,
-				ts->int_trigger_type |
-				IRQF_ONESHOT | IRQF_NO_SUSPEND |
-				IRQF_PERF_CRITICAL, NVT_SPI_NAME, ts);
+				ts->int_trigger_type | IRQF_ONESHOT, NVT_SPI_NAME, ts);
 		if (ret != 0) {
 			NVT_ERR("request irq failed. ret=%d\n", ret);
 			goto err_int_request_failed;
