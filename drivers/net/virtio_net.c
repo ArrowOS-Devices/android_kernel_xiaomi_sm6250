@@ -1262,7 +1262,7 @@ static int xmit_skb(struct send_queue *sq, struct sk_buff *skb)
 	if (virtio_net_hdr_from_skb(skb, &hdr->hdr,
 				    virtio_is_little_endian(vi->vdev), false,
 				    0))
-		return -EPROTO;
+		BUG();
 
 	if (vi->mergeable_rx_bufs)
 		hdr->num_buffers = 0;
@@ -2765,11 +2765,8 @@ static __maybe_unused int virtnet_restore(struct virtio_device *vdev)
 	virtnet_set_queues(vi, vi->curr_queue_pairs);
 
 	err = virtnet_cpu_notif_add(vi);
-	if (err) {
-		virtnet_freeze_down(vdev);
-		remove_vq_common(vi);
+	if (err)
 		return err;
-	}
 
 	return 0;
 }
