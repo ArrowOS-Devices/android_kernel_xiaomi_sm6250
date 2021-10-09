@@ -430,9 +430,7 @@ static umode_t iscsi_iface_attr_is_visible(struct kobject *kobj,
 	int param;
 	int param_type;
 
-	if (attr == &dev_attr_iface_enabled.attr)
-		param = ISCSI_NET_PARAM_IFACE_ENABLE;
-	else if (attr == &dev_attr_iface_vlan_id.attr)
+	if (attr == &dev_attr_iface_vlan_id.attr)
 		param = ISCSI_NET_PARAM_VLAN_ID;
 	else if (attr == &dev_attr_iface_vlan_priority.attr)
 		param = ISCSI_NET_PARAM_VLAN_PRIORITY;
@@ -497,7 +495,10 @@ static umode_t iscsi_iface_attr_is_visible(struct kobject *kobj,
 	else if (attr == &dev_attr_iface_initiator_name.attr)
 		param = ISCSI_IFACE_PARAM_INITIATOR_NAME;
 	else if (iface->iface_type == ISCSI_IFACE_TYPE_IPV4) {
-		if (attr == &dev_attr_ipv4_iface_ipaddress.attr)
+
+        	if (attr == &dev_attr_iface_enabled.attr)
+	        	param = ISCSI_NET_PARAM_IFACE_ENABLE;
+		else if (attr == &dev_attr_ipv4_iface_ipaddress.attr)
 			param = ISCSI_NET_PARAM_IPV4_ADDR;
 		else if (attr == &dev_attr_ipv4_iface_gateway.attr)
 			param = ISCSI_NET_PARAM_IPV4_GW;
