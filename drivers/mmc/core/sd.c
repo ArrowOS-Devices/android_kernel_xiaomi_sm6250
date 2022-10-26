@@ -860,8 +860,8 @@ try_again:
 	 * In case CCS and S18A in the response is set, start Signal Voltage
 	 * Switch procedure. SPI mode doesn't support CMD11.
 	 */
-	if (!mmc_host_is_spi(host) && rocr &&
-	   ((*rocr & 0x41000000) == 0x41000000)) {
+	if (!mmc_host_is_spi(host) && (ocr & SD_OCR_S18R) &&
+	    rocr && (*rocr & SD_ROCR_S18A)) {
 		err = mmc_set_uhs_voltage(host, pocr);
 		if (err == -EAGAIN) {
 			retries--;
