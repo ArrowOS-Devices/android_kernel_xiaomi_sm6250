@@ -6,14 +6,14 @@
 KERNEL_DEFCONFIG=cust_defconfig
 ANYKERNEL3_DIR=$PWD/AnyKernel3/
 FINAL_KERNEL_ZIP=Etherious-miatoll-$(date '+%Y%m%d').zip
-export PATH="$HOME/proton/bin:$PATH"
+export PATH="$HOME/cosmic/bin:$PATH"
 export ARCH=arm64
 export SUBARCH=arm64
-export KBUILD_COMPILER_STRING="$($HOME/proton/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
+export KBUILD_COMPILER_STRING="$($HOME/cosmic/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
 
-if ! [ -d "$HOME/proton" ]; then
-echo "Proton clang not found! Cloning..."
-if ! git clone -q https://github.com/kdrag0n/proton-clang --depth=1 --single-branch ~/proton; then
+if ! [ -d "$HOME/cosmic" ]; then
+echo "Cosmic clang not found! Cloning..."
+if ! git clone -q https://gitlab.com/GhostMaster69-dev/cosmic-clang.git --depth=1 --single-branch ~/cosmic; then
 echo "Cloning failed! Aborting..."
 exit 1
 fi
@@ -44,8 +44,8 @@ make -j$(nproc --all) O=out \
                       CC=clang \
                       CROSS_COMPILE=aarch64-linux-gnu- \
                       CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+                      AR=llvm-ar \
                       NM=llvm-nm \
-                      OBJCOPY=llvm-objcopy \
                       OBJDUMP=llvm-objdump \
                       STRIP=llvm-strip
 
@@ -83,8 +83,8 @@ DIFF=$(($BUILD_END - $BUILD_START))
 echo -e "$yellow Build completed in $(($DIFF / 60)) minute(s) and $(($DIFF % 60)) seconds.$nocol"
 
 echo "**** Uploading your zip now ****"
-if command -v gdrive &> /dev/null; then
-gdrive upload --share $FINAL_KERNEL_ZIP
+if command -v curl &> /dev/null; then
+curl -T $FINAL_KERNEL_ZIP temp.sh
 else
 echo "Zip: $FINAL_KERNEL_ZIP"
 fi
